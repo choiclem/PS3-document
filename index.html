@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consent Extract</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --ink: #0e0f11;
+            --paper: #f5f2eb;
+            --rule: #d4cfc4;
+            --accent: #c8401a;
+            --muted: #8a8278;
+            --card: #faf8f3;
+            --green: #2d7a3a;
+        }
+
+        body {
+            background: var(--paper);
+            color: var(--ink);
+            font-family: 'DM Mono', monospace;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 48px 20px 80px;
+        }
+
+        header { text-align: center; margin-bottom: 48px; }
+        header .main-logo { max-height: 50px; margin: 0 auto 20px; display: block; }
+        header .eyebrow { font-size: 0.68rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+        header h1 { font-family: 'DM Serif Display', serif; font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.1; color: var(--ink); }
+        header h1 em { font-style: italic; color: var(--accent); }
+        header .rule { width: 48px; height: 2px; background: var(--accent); margin: 18px auto 0; }
+
+        .drop-zone {
+            width: 100%; max-width: 580px;
+            border: 2px dashed var(--rule); border-radius: 4px;
+            padding: 56px 32px; text-align: center; cursor: pointer;
+            position: relative; transition: border-color 0.2s, background 0.2s; background: var(--card);
+        }
+        .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: #fdf5f1; }
+        .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+        .drop-icon {
+            width: 52px; height: 52px; margin: 0 auto 20px;
+            border: 2px solid var(--rule); border-radius: 2px;
+            display: flex; align-items: center; justify-content: center;
+            transition: border-color 0.2s; background: var(--paper);
+        }
+        .drop-zone:hover .drop-icon, .drop-zone.drag-over .drop-icon { border-color: var(--accent); }
+        .drop-icon svg { width: 24px; height: 24px; stroke: var(--muted); transition: stroke 0.2s; }
+        .drop-zone:hover .drop-icon svg, .drop-zone.drag-over .drop-icon svg { stroke: var(--accent); }
+        .drop-label { font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
+        .drop-label strong { display: block; font-size: 1rem; color: var(--ink); font-weight: 500; margin-bottom: 4px; }
+
+        .loading-bar { width: 100%; max-width: 580px; margin-top: 20px; display: none; }
+        .loading-bar.visible { display: block; }
+        .loading-track { height: 2px; background: var(--rule); border-radius: 2px; overflow: hidden; }
+        .loading-fill { height: 100%; background: var(--accent); animation: loading-sweep 1.6s ease-in-out infinite; }
+        @keyframes loading-sweep {
+            0%   { width: 0%; margin-left: 0%; }
+            50%  { width: 60%; margin-left: 20%; }
+            100% { width: 0%; margin-left: 100%; }
+        }
+        .loading-text { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-top: 10px; text-align: center; }
+
+        .results { 
+            width: 100%; 
+            max-width: 660px;
+            margin-top: 36px; 
+            padding: 40px 48px;
+            background: #ffffff;
+            border: 1px solid var(--rule);
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.03);
+            display: none; 
+            animation: fade-up 0.4s ease both; 
+        }
+        .results.visible { display: block; }
+        @keyframes fade-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+        @media (max-width: 600px) {
+            .results { padding: 32px 24px; }
+            .field { grid-template-columns: 1fr; gap: 6px; padding: 14px 0; }
+        }
+
+        .results-header {
+            display: flex; align-items: baseline; justify-content: space-between;
+            border-bottom: 2px solid var(--ink); padding-bottom: 10px; margin-bottom: 10px;
+        }
+        .results-header h2 { font-family: 'DM Serif Display', serif; font-size: 1.3rem; }
+        .results-header .file-name { font-size: 0.7rem; color: var(--muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .field { border-bottom: 1px solid var(--rule); padding: 18px 0; display: grid; grid-template-columns: 160px 1fr; gap: 12px; align-items: start; }
+        .field.form-field { align-items: center; }
+        .field-label { font-size: 0.65rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); padding-top: 2px; }
+        .field-value { font-size: 0.88rem; color: var(--ink); line-height: 1.5; font-weight: 500; }
+        .field-value.not-found { color: var(--muted); font-style: italic; font-weight: 400; }
+
+        .custom-input {
+            width: 100%;
+            padding: 8px 10px;
+            font-family: 'DM Mono', monospace;
+            font-size: 0.85rem;
+            color: var(--ink);
+            background: var(--card);
+            border: 1px solid var(--rule);
+            border-radius: 3px;
+            outline: none;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .custom-input:focus { border-color: var(--accent); background: #fff; }
+        .custom-input::placeholder { color: var(--muted); opacity: 0.6; }
+
+        .copy-btn {
+            background: none; border: 1px solid var(--rule); border-radius: 2px;
+            padding: 2px 8px; font-family: 'DM Mono', monospace; font-size: 0.65rem;
+            letter-spacing: 0.08em; color: var(--muted); cursor: pointer;
+            margin-left: 8px; vertical-align: middle; transition: all 0.15s;
+        }
+        .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .copy-btn.copied { border-color: var(--green); color: var(--green); }
+
+        .section-title { font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink); margin: 30px 0 10px; font-weight: bold; }
+
+        .ps3-action { margin-top: 28px; border-top: 1px solid var(--rule); padding-top: 24px; }
+
+        .ps3-btn {
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            width: 100%; padding: 16px 24px;
+            background: var(--ink); color: var(--paper);
+            border: none; border-radius: 3px;
+            font-family: 'DM Mono', monospace; font-size: 0.82rem;
+            letter-spacing: 0.1em; text-transform: uppercase;
+            cursor: pointer; transition: background 0.18s, transform 0.1s;
+        }
+        .ps3-btn:hover:not(:disabled) { background: #222; transform: translateY(-1px); }
+        .ps3-btn:active { transform: translateY(0); }
+        .ps3-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .ps3-btn svg { width: 16px; height: 16px; stroke: currentColor; flex-shrink: 0; }
+
+        .ps3-hint { font-size: 0.68rem; color: var(--muted); text-align: center; margin-top: 10px; letter-spacing: 0.04em; }
+
+        footer { margin-top: 64px; font-size: 0.68rem; color: var(--rule); letter-spacing: 0.08em; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <img src="logo.png" alt="Argus Logo" class="main-logo">
+        <p class="eyebrow">Auckland Council &mdash; Document Tools</p>
+        <h1>ARGUS PS3<br><em>Generator</em></h1>
+        <div class="rule"></div>
+    </header>
+
+    <div class="drop-zone" id="drop-zone">
+        <input type="file" id="pdf-upload" accept="application/pdf">
+        <div class="drop-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="12" y1="12" x2="12" y2="18"/>
+                <polyline points="9 15 12 12 15 15"/>
+            </svg>
+        </div>
+        <div class="drop-label">
+            <strong>Drop ONLY form 5 consent document here</strong>
+            or click to browse files
+        </div>
+    </div>
+
+    <div class="loading-bar" id="loading-bar">
+        <div class="loading-track"><div class="loading-fill"></div></div>
+        <div class="loading-text">Extracting data&hellip;</div>
+    </div>
+
+    <div class="results" id="results">
+        <div class="results-header">
+            <h2>Consent Extract</h2>
+            <span class="file-name" id="file-name-display"></span>
+        </div>
+
+        <div class="field">
+            <span class="field-label">Consent No.</span>
+            <span class="field-value" id="val-consent">—</span>
+        </div>
+        <div class="field">
+            <span class="field-label">Street Address</span>
+            <span class="field-value" id="val-address">—</span>
+        </div>
+        <div class="field">
+            <span class="field-label">Legal Description</span>
+            <span class="field-value" id="val-legal">—</span>
+        </div>
+        <div class="field">
+            <span class="field-label">Owner Name</span>
+            <span class="field-value" id="val-owner">—</span>
+        </div>
+
+        <div class="section-title">Manual Form Details</div>
+
+        <div class="field form-field">
+            <label class="field-label" for="input-job">Job Name</label>
+            <input type="text" id="input-job" class="custom-input" placeholder="e.g. PRO-0049408 - Westfield Newmarket - Katsubi">
+        </div>
+        <div class="field form-field">
+            <label class="field-label" for="input-contractor">Main Contractor</label>
+            <input type="text" id="input-contractor" class="custom-input" placeholder="e.g. Trust Projects">
+        </div>
+        <div class="field form-field">
+            <label class="field-label" for="input-date">Date</label>
+            <input type="date" id="input-date" class="custom-input">
+        </div>
+        <div class="field form-field">
+            <label class="field-label" for="input-standard">Design Standard</label>
+            <select id="input-standard" class="custom-input">
+                <option value="NZS4541: 2020">NZS4541 : 2020</option>
+                <option value="NZS4541: 2013">NZS4541 : 2013</option>
+            </select>
+        </div>
+        <div class="field form-field">
+            <label class="field-label" for="input-type">Type of System</label>
+            <input type="text" id="input-type" class="custom-input" placeholder="e.g. 6" value="6">
+        </div>
+
+        <div class="ps3-action">
+            <button class="ps3-btn" id="ps3-btn" onclick="createPS3()">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="12" y1="18" x2="12" y2="12"/>
+                    <line x1="9" y1="15" x2="15" y2="15"/>
+                </svg>
+                Create PS3
+            </button>
+            <p class="ps3-hint">Opens a print-ready PS3 in a new tab &mdash; use Ctrl+P &rarr; Save as PDF</p>
+        </div>
+    </div>
+
+    <footer>Processing happens entirely in your browser &mdash; no data is uploaded.</footer>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        let extracted = { consent: '', address: '', legal: '', owner: '' };
+
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('pdf-upload');
+
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type === 'application/pdf') handleFile(file);
+        });
+        fileInput.addEventListener('change', (e) => { const file = e.target.files[0]; if (file) handleFile(file); });
+
+        function handleFile(file) {
+            document.getElementById('loading-bar').classList.add('visible');
+            document.getElementById('results').classList.remove('visible');
+            document.getElementById('file-name-display').textContent = file.name;
+            const reader = new FileReader();
+            reader.onload = (ev) => extractTextFromPDF(new Uint8Array(ev.target.result));
+            reader.readAsArrayBuffer(file);
+        }
+
+        async function extractTextFromPDF(pdfData) {
+            try {
+                const pdf = await pdfjsLib.getDocument(pdfData).promise;
+                let fullText = '';
+                for (let p = 1; p <= pdf.numPages; p++) {
+                    const page = await pdf.getPage(p);
+                    const tc = await page.getTextContent();
+                    fullText += tc.items.map(i => i.str).join(' ') + ' ';
+                }
+                parseAndDisplay(fullText);
+            } catch (err) {
+                console.error(err);
+                alert('Could not read the PDF. Ensure it is a text-searchable PDF.');
+                document.getElementById('loading-bar').classList.remove('visible');
+            }
+        }
+
+        function parseAndDisplay(text) {
+            text = text.replace(/\s+/g, ' ');
+            const consentMatch = text.match(/Building consent number:\s*([A-Z0-9]+)/i);
+            const ownerMatch   = text.match(/Name of owner:\s*(.*?)(?=\s*Contact person:|\s*Mailing address:)/i);
+            const addressMatch = text.match(/Street address of.*?building:\s*(.*?)(?=\s*Legal description)/i);
+            const legalMatch   = text.match(/Legal description of.*?located:\s*(.*?)(?=\s*Building name:)/i);
+
+            extracted.consent = consentMatch ? consentMatch[1].trim() : '';
+            extracted.owner   = ownerMatch   ? ownerMatch[1].trim()   : '';
+            extracted.address = addressMatch ? addressMatch[1].trim() : '';
+            extracted.legal   = legalMatch   ? legalMatch[1].trim()   : '';
+
+            setValue('val-consent', extracted.consent);
+            setValue('val-owner',   extracted.owner);
+            setValue('val-address', extracted.address);
+            setValue('val-legal',   extracted.legal);
+
+            const todayISO = new Date().toISOString().split('T')[0];
+            document.getElementById('input-date').value = todayISO;
+
+            document.getElementById('loading-bar').classList.remove('visible');
+            document.getElementById('results').classList.add('visible');
+        }
+
+        function setValue(id, value) {
+            const el = document.getElementById(id);
+            if (value) {
+                el.className = 'field-value';
+                el.innerHTML = value + `<button class="copy-btn" onclick="copyVal(this,'${value.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">copy</button>`;
+            } else {
+                el.className = 'field-value not-found';
+                el.textContent = 'Not found';
+            }
+        }
+
+        function copyVal(btn, text) {
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = 'copied!'; btn.classList.add('copied');
+                setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1800);
+            });
+        }
+
+        function buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eType, docTitle) {
+            return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${docTitle}</title>
+<style>
+  @page { size: A4; margin: 5mm 15mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { 
+    font-family: Arial, Helvetica, sans-serif; 
+    font-size: 9.5pt; 
+    line-height: 1.4; 
+    color: #000; 
+    background: #fff; 
+  }
+
+  .top-banner { 
+    width: 100%;
+    text-align: center; 
+    margin-bottom: 25pt; 
+    margin-top: 0; 
+  }
+  .top-banner img { 
+    width: 100%; 
+    height: auto; 
+    display: block; 
+    margin: 0 auto; 
+  }
+
+  .title-block { text-align: center; margin-bottom: 25pt; line-height: 1.35; }
+  .title-block h1 { font-size: 13pt; font-weight: bold; }
+
+  .fields-table { width: 100%; border-collapse: collapse; margin-bottom: 18pt; }
+  .fields-table td { padding: 6pt 0; vertical-align: top; }
+  .fields-table .lbl { width: 52%; }
+  .fields-table .colon { width: 3%; }
+  .fields-table .val { width: 45%; }
+  .val.placeholder { color: #e50000; }
+
+  .body-text { margin-bottom: 14pt; }
+  
+  /* Evenly spaced System Table */
+  .sys-table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    margin: 18pt 0; 
+    table-layout: fixed; /* Forces exactly equal columns */
+  }
+  .sys-table th, .sys-table td { 
+    padding-bottom: 10pt; 
+    text-align: left; 
+    width: 33.33%; /* 3 equal columns */
+    font-weight: bold;
+  }
+
+  .part-box { border: 1.5px solid #000; padding: 1pt 3pt; font-weight: bold; }
+
+  .author-row { display: flex; justify-content: space-between; margin-top: 20pt; margin-bottom: 15pt; }
+
+  .signoff-table { width: 100%; border-collapse: collapse; margin-bottom: 50pt; }
+  .signoff-table td { padding: 1.5pt 0; vertical-align: top; }
+  .signoff-table .slbl { width: 12%; font-weight: bold; }
+  .signoff-table .sval { width: 40%; }
+  .signoff-table .qlbl { width: 15%; font-weight: bold; }
+  .signoff-table .qval { width: 33%; }
+
+  .signature { margin-bottom: 40pt; }
+
+  .footer { 
+    position: fixed; bottom: 0; left: 0; right: 0; 
+    border-top: 3px solid #F47920; padding-top: 10pt; 
+    display: flex; justify-content: space-between; align-items: flex-end;
+    font-size: 7.5pt; color: #444; 
+  }
+  .footer-col1 { line-height: 1.5; }
+  .footer-col2 { display: grid; grid-template-columns: 14pt auto; gap: 2pt; line-height: 1.5; }
+  .footer-col2 b { color: #888; font-weight: bold; }
+  .footer-col3 { display: flex; align-items: center; gap: 8pt; text-align: left; }
+  
+  .vert-call { color: #F47920; font-weight: bold; font-size: 8pt; line-height: 1.1; text-align: center; }
+  .footer-nums { font-size: 11pt; font-weight: 900; color: #000; line-height: 1.1; }
+  .footer-web { font-size: 7.5pt; color: #444; margin-top: 1pt; }
+
+  @media screen {
+    body { padding: 24px; max-width: 780px; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.1); margin-top: 20px; }
+    .footer { position: static; margin-top: 40px; }
+    .print-btn {
+      display: block; margin: 0 auto 24px; padding: 10px 28px;
+      background: #1a1a1a; color: #fff; border: none; border-radius: 4px;
+      font-family: Arial, sans-serif; font-size: 11pt; cursor: pointer;
+    }
+  }
+  @media print { .print-btn { display: none !important; } }
+</style>
+</head>
+<body>
+
+<button class="print-btn" onclick="window.print()">⬇ Save as PDF (Ctrl+P)</button>
+
+<div class="top-banner">
+  <img src="logo.png" alt="Argus Assuring Fire Protection">
+</div>
+
+<div class="title-block">
+  <h1>ARGUS FIRE SYSTEM SERVICE LIMITED<br>DESIGN/CONSTRUCTION<br>PRODUCER STATEMENT PS3</h1>
+</div>
+
+<table class="fields-table">
+  <tr>
+    <td class="lbl">Building Consent No.</td><td class="colon">:</td><td class="val">${eConsent}</td>
+  </tr>
+  <tr>
+    <td class="lbl">Producer Statement issued by</td><td class="colon">:</td><td class="val">Argus Fire Systems Service Limited</td>
+  </tr>
+  <tr>
+    <td class="lbl">To</td><td class="colon">:</td><td class="val">Auckland Council</td>
+  </tr>
+  <tr>
+    <td class="lbl">In respect of an application for Building Consent made by</td><td class="colon">:</td><td class="val">${eOwner}</td>
+  </tr>
+  <tr>
+    <td class="lbl">Address</td><td class="colon">:</td><td class="val">${eAddress}</td>
+  </tr>
+  <tr>
+    <td class="lbl">Legal description of land where building is located</td><td class="colon">:</td><td class="val">${eLegal}</td>
+  </tr>
+  <tr>
+    <td class="lbl">Main contractor</td><td class="colon">:</td><td class="val">${eContractor}</td>
+  </tr>
+</table>
+
+<p class="body-text">Argus Fire Systems Service Limited has installed / made conforming alterations to a fire protection system(s)<br>type as detailed below: -</p>
+
+<table class="sys-table">
+  <thead><tr><th>System</th><th>Design Standard</th><th>Type</th></tr></thead>
+  <tbody><tr><td>Fire Sprinkler System</td><td>${eStandard}</td><td>${eType}</td></tr></tbody>
+</table>
+
+<p class="body-text">This covers <span class="part-box">PART ONLY</span> of the fire protection system as described in the Building Consent.</p>
+
+<p class="body-text" style="margin-bottom: 4pt;">We understand that if this Producer Statement is accepted it will be relied upon by Auckland City Council for<br>the purpose of establishing compliance with the Building Code for the system installed.</p>
+<p class="body-text">Ref: ${eJob}</p>
+
+<div class="author-row">
+  <div>Producer Statement Author &ndash; Acceptance No.:127200</div>
+  <div style="margin-right: 50mm;">Date ${dateStr}</div>
+</div>
+
+<table class="signoff-table">
+  <tr>
+    <td class="slbl">NAME:</td>
+    <td class="sval">Argus Fire Systems Service Limited</td>
+    <td class="qlbl">Qualification:</td>
+    <td class="qval">ICONZ - NO.004</td>
+  </tr>
+  <tr>
+    <td class="slbl">ADDRESS:</td>
+    <td class="sval">P O Box 13-508, Onehunga, Auckland</td>
+    <td></td>
+    <td class="qval">Registered Designers and</td>
+  </tr>
+  <tr>
+    <td class="slbl">PHONE:</td>
+    <td class="sval">09-634-0250</td>
+    <td></td>
+    <td class="qval">Installation Engineers</td>
+  </tr>
+  <tr>
+    <td class="slbl">FAX:</td>
+    <td class="sval">09-634-7319</td>
+    <td></td>
+    <td></td>
+  </tr>
+</table>
+
+<div class="signature">Signature ................................................................................(Shawn Deysel)</div>
+
+<div class="footer">
+  <div class="footer-col1">
+    P O Box 13508,<br>Onehunga,<br>Auckland 1643
+  </div>
+  <div class="footer-col2">
+    <b>P</b><div>09 634 0250</div>
+    <b>F</b><div>09 634 7319</div>
+    <b>E</b><div>north@argusfire.co.nz</div>
+  </div>
+  <div class="footer-col3">
+    <div class="vert-call">C<br>A<br>L<br>L</div>
+    <div>
+      <div class="footer-nums">0800 4 ARGUS<br>0800 427 487</div>
+      <div class="footer-web">www.argusfire.co.nz</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.onload = () => {
+    setTimeout(() => window.print(), 500);
+  };
+<\/script>
+</body>
+</html>`;
+        }
+
+        function createPS3() {
+            const btn = document.getElementById('ps3-btn');
+            btn.innerHTML = 'Opening&hellip;';
+            btn.disabled = true;
+
+            try {
+                const e = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                
+                const eConsent = extracted.consent ? e(extracted.consent) : '<span class="placeholder">"Consent No."</span>';
+                const eOwner   = extracted.owner   ? e(extracted.owner)   : '<span class="placeholder">"Owner Name"</span>';
+                const eAddress = extracted.address ? e(extracted.address) : '<span class="placeholder">"Street Address"</span>';
+                const eLegal   = extracted.legal   ? e(extracted.legal)   : '<span class="placeholder">"Legal Description"</span>';
+
+                const rawJob = document.getElementById('input-job').value.trim();
+                const rawContractor = document.getElementById('input-contractor').value.trim();
+                const rawDate = document.getElementById('input-date').value;
+                const rawStandard = document.getElementById('input-standard').value;
+                const rawType = document.getElementById('input-type').value.trim();
+
+                const eJob = rawJob ? e(rawJob) : '<span class="placeholder">"Job Name"</span>';
+                const eContractor = rawContractor ? e(rawContractor) : '<span class="placeholder">"Main Contractor"</span>';
+                const eStandard = e(rawStandard);
+                const eType = rawType ? e(rawType) : '<span class="placeholder">"Type"</span>';
+
+                // Extract PRO- number to generate dynamic document title for printing
+                const proMatch = rawJob.match(/PRO-[\w\d]+/i);
+                const proString = proMatch ? proMatch[0].toUpperCase() : '';
+                const docTitle = proString ? `PS3 ${proString} ARGUS` : `PS3 ARGUS`;
+
+                let dateStr = "";
+                if (rawDate) {
+                    const [year, month, day] = rawDate.split('-');
+                    dateStr = `${day}/${month}/${year}`;
+                } else {
+                    dateStr = '<span class="placeholder">"Date"</span>';
+                }
+
+                const html = buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eType, docTitle);
+                
+                const win = window.open('', '_blank');
+                if (win) {
+                    win.document.open();
+                    win.document.write(html);
+                    win.document.close();
+                } else {
+                    alert('Please allow pop-ups for this page to open the PS3.');
+                }
+
+            } catch (err) {
+                console.error(err);
+                alert('Error generating PS3: ' + err.message);
+            } finally {
+                btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;stroke:currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg> Create PS3`;
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
