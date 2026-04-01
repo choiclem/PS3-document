@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Consent Extract</title>
+    <title>ARGUS PS3 Generator</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
     <style>
@@ -220,11 +220,17 @@
             <select id="input-standard" class="custom-input">
                 <option value="NZS4541: 2020">NZS4541 : 2020</option>
                 <option value="NZS4541: 2013">NZS4541 : 2013</option>
+                <option value="NZS4512: 2010">NZS4512 : 2010</option>
+                <option value="NZS4512: 2021">NZS4512 : 2021</option>
             </select>
         </div>
         <div class="field form-field">
+            <label class="field-label" for="input-system">System</label>
+            <input type="text" id="input-system" class="custom-input" value="Fire Sprinkler System">
+        </div>
+        <div class="field form-field">
             <label class="field-label" for="input-type">Type of System</label>
-            <input type="text" id="input-type" class="custom-input" placeholder="e.g. 6" value="6">
+            <input type="text" id="input-type" class="custom-input" value="6">
         </div>
 
         <div class="ps3-action">
@@ -241,7 +247,7 @@
         </div>
     </div>
 
-    <footer>Processing happens entirely in your browser &mdash; no data is uploaded.</footer>
+    <footer>Designed and developed by Argus #1 - IT Specialist Clem Choi</footer>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
@@ -250,6 +256,21 @@
 
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('pdf-upload');
+
+        // Automatically update System and Type based on Standard selection
+        document.getElementById('input-standard').addEventListener('change', function(e) {
+            const val = e.target.value;
+            const systemInput = document.getElementById('input-system');
+            const typeInput = document.getElementById('input-type');
+            
+            if (val.includes('NZS4512')) {
+                systemInput.value = 'Fire Alarm';
+                typeInput.value = '7';
+            } else if (val.includes('NZS4541')) {
+                systemInput.value = 'Fire Sprinkler System';
+                typeInput.value = '6';
+            }
+        });
 
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
         dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
@@ -329,12 +350,13 @@
             });
         }
 
-        function buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eType, docTitle) {
+        function buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eSystem, eType, docTitle, baseUrl) {
             return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>${docTitle}</title>
+<base href="${baseUrl}">
 <style>
   @page { size: A4; margin: 5mm 15mm; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -465,7 +487,7 @@
 
 <table class="sys-table">
   <thead><tr><th>System</th><th>Design Standard</th><th>Type</th></tr></thead>
-  <tbody><tr><td>Fire Sprinkler System</td><td>${eStandard}</td><td>${eType}</td></tr></tbody>
+  <tbody><tr><td>${eSystem}</td><td>${eStandard}</td><td>${eType}</td></tr></tbody>
 </table>
 
 <p class="body-text">This covers <span class="part-box">PART ONLY</span> of the fire protection system as described in the Building Consent.</p>
@@ -551,11 +573,13 @@
                 const rawContractor = document.getElementById('input-contractor').value.trim();
                 const rawDate = document.getElementById('input-date').value;
                 const rawStandard = document.getElementById('input-standard').value;
+                const rawSystem = document.getElementById('input-system').value.trim();
                 const rawType = document.getElementById('input-type').value.trim();
 
                 const eJob = rawJob ? e(rawJob) : '<span class="placeholder">"Job Name"</span>';
                 const eContractor = rawContractor ? e(rawContractor) : '<span class="placeholder">"Main Contractor"</span>';
                 const eStandard = e(rawStandard);
+                const eSystem = rawSystem ? e(rawSystem) : '<span class="placeholder">"System"</span>';
                 const eType = rawType ? e(rawType) : '<span class="placeholder">"Type"</span>';
 
                 // Extract PRO- number to generate dynamic document title for printing
@@ -571,7 +595,10 @@
                     dateStr = '<span class="placeholder">"Date"</span>';
                 }
 
-                const html = buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eType, docTitle);
+                // Grab the current directory URL to fix relative paths in the new blank tab
+                const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
+
+                const html = buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eSystem, eType, docTitle, baseUrl);
                 
                 const win = window.open('', '_blank');
                 if (win) {
