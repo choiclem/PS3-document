@@ -327,7 +327,7 @@
 
         function parseAndDisplay(text) {
             text = text.replace(/\s+/g, ' ');
-            const consentMatch = text.match(/Building consent number:\s*([A-Z0-9]+)/i);
+            const consentMatch = text.match(/Building consent number:\s*([A-Z0-9\-]+)/i);
             const ownerMatch   = text.match(/Name of owner:\s*(.*?)(?=\s*Contact person:|\s*Mailing address:)/i);
             const addressMatch = text.match(/Street address of.*?building:\s*(.*?)(?=\s*Legal description)/i);
             const legalMatch   = text.match(/Legal description of.*?located:\s*(.*?)(?=\s*Building name:)/i);
@@ -519,7 +519,7 @@
     <td class="lbl">Address</td><td class="colon">:</td><td class="val">${eAddress}</td>
   </tr>
   <tr>
-    <td class="lbl">Legal description of land where building is located</td><td class="colon">:</td><td class="val">${eLegal}</td>
+    <td class="lbl">Legal description of land where building is located</td><td class="colon">:</td><td class="val" id="legal-cell">${eLegal}</td>
   </tr>
   <tr>
     <td class="lbl">Main contractor</td><td class="colon">:</td><td class="val">${eContractor}</td>
@@ -598,22 +598,37 @@
 
     function scaleToA4AndPrint() {
       const wrap = document.querySelector('.page-wrap');
-      // Reset any previous zoom
+      const legalCell = document.getElementById('legal-cell');
+
+      // Reset any previous adjustments
       wrap.style.zoom = '';
+      wrap.style.height = '';
+      if (legalCell) legalCell.style.fontSize = '';
 
       // A4 content height: 297mm minus top+bottom @page margins (5mm each) = 287mm
       // 1mm = 96/25.4 px at 96dpi
       const mmToPx = 96 / 25.4;
       const a4ContentH = 287 * mmToPx; // ~1085px
 
+      // Step 1: if overflowing, try shrinking ONLY the legal description font first.
+      // Body default is 9.5pt; step down by 0.25pt until it fits, or until 5pt floor.
+      if (legalCell && wrap.scrollHeight > a4ContentH) {
+        let fontSize = 9.5;
+        while (wrap.scrollHeight > a4ContentH && fontSize > 5) {
+          fontSize -= 0.25;
+          legalCell.style.fontSize = fontSize + 'pt';
+          legalCell.style.lineHeight = '1.25';
+        }
+      }
+
+      // Step 2: if STILL overflowing (extremely rare), fall back to scaling the whole page
       const wrapH = wrap.scrollHeight;
       if (wrapH > a4ContentH) {
         const scale = a4ContentH / wrapH;
         wrap.style.zoom = scale.toFixed(6);
-        // After zoom, force the wrap height to exactly A4 so footer stays in bounds
         wrap.style.height = a4ContentH + 'px';
       } else {
-        // Content is shorter than A4 — still lock height so footer is pinned to bottom of page
+        // Content fits — lock height so footer is pinned to bottom of page
         wrap.style.height = a4ContentH + 'px';
       }
 
@@ -695,3 +710,4 @@
     </script>
 </body>
 </html>
+
