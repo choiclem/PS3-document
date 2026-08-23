@@ -175,13 +175,17 @@
 
     <div class="loading-bar" id="loading-bar">
         <div class="loading-track"><div class="loading-fill"></div></div>
-        <div class="loading-text">Extracting data&hellip;</div>
+        <div class="loading-text" id="loading-text">Extracting data&hellip;</div>
     </div>
 
     <div class="results" id="results">
         <div class="results-header">
             <h2>Consent Extract</h2>
             <span class="file-name" id="file-name-display"></span>
+        </div>
+
+        <div id="ocr-notice" style="display:none; font-size:0.78rem; color:#b45309; background:#fef3c7; border:1px solid #fcd34d; border-radius:6px; padding:8px 12px; margin-bottom:14px;">
+            ⚠ Extracted via OCR (scanned PDF) — numbers and letters may be misread. Please verify each value against the original document.
         </div>
 
         <div class="field">
@@ -308,8 +312,65 @@
             reader.readAsArrayBuffer(file);
         }
 
+        function setLoadingText(msg) {
+            const el = document.getElementById('loading-text');
+            if (el) el.textContent = msg;
+        }
+
+        // Lazy-load Tesseract.js only when OCR is actually needed
+        let tesseractPromise = null;
+        function loadTesseract() {
+            if (window.Tesseract) return Promise.resolve();
+            if (!tesseractPromise) {
+                tesseractPromise = new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+                    s.onload = resolve;
+                    s.onerror = () => reject(new Error('Failed to load OCR engine'));
+                    document.head.appendChild(s);
+                });
+            }
+            return tesseractPromise;
+        }
+
+        // A usable text layer must contain the Form 5 anchor phrase;
+        // scanned PDFs have no (or garbage) text and fail this check.
+        function textLayerLooksUsable(text) {
+            return text.replace(/\s+/g, ' ').trim().length > 200
+                && /Building\s+consent\s+number/i.test(text);
+        }
+
+        async function ocrPdf(pdf) {
+            await loadTesseract();
+            let ocrText = '';
+            for (let p = 1; p <= pdf.numPages; p++) {
+                setLoadingText(`OCR — rendering page ${p} of ${pdf.numPages}…`);
+                const page = await pdf.getPage(p);
+                // Render at ~300dpi equivalent for OCR accuracy (A4 width → ~2500px)
+                const base = page.getViewport({ scale: 1 });
+                const scale = Math.min(4.2, 2500 / base.width);
+                const viewport = page.getViewport({ scale });
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.ceil(viewport.width);
+                canvas.height = Math.ceil(viewport.height);
+                await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+                const { data } = await Tesseract.recognize(canvas, 'eng', {
+                    logger: (m) => {
+                        if (m.status === 'recognizing text') {
+                            setLoadingText(`OCR — page ${p} of ${pdf.numPages} (${Math.round(m.progress * 100)}%)…`);
+                        }
+                    }
+                });
+                ocrText += data.text + ' ';
+                canvas.width = canvas.height = 0; // free memory
+            }
+            return ocrText;
+        }
+
         async function extractTextFromPDF(pdfData) {
             try {
+                setLoadingText('Extracting data…');
                 const pdf = await pdfjsLib.getDocument(pdfData).promise;
                 let fullText = '';
                 for (let p = 1; p <= pdf.numPages; p++) {
@@ -317,25 +378,107 @@
                     const tc = await page.getTextContent();
                     fullText += tc.items.map(i => i.str).join(' ') + ' ';
                 }
-                parseAndDisplay(fullText);
+
+                if (textLayerLooksUsable(fullText)) {
+                    parseAndDisplay(fullText, null, false);
+                } else {
+                    // Scanned / image-only PDF → fall back to OCR
+                    setLoadingText('No text layer found — starting OCR…');
+                    fullText = await ocrPdf(pdf);
+                    parseAndDisplay(fullText, parseOcrFields(fullText), true);
+                }
             } catch (err) {
                 console.error(err);
-                alert('Could not read the PDF. Ensure it is a text-searchable PDF.');
+                alert('Could not read the PDF. ' + (err && err.message ? err.message : 'Ensure it is a valid PDF file.'));
                 document.getElementById('loading-bar').classList.remove('visible');
             }
         }
 
-        function parseAndDisplay(text) {
+        function cleanOcrValue(v) {
+            return v.replace(/^[\s:;.,|\[\]\/\\_—–-]+/, '')
+                    .replace(/[\s|\[\]\\_]+$/, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+        }
+
+        // OCR output scrambles the Form 5 box layout, so labels and values can land
+        // on different lines in a different order — parse line-by-line with fallbacks.
+        function parseOcrFields(rawText) {
+            const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const flat = rawText.replace(/\s+/g, ' ');
+            const f = { consent: '', address: '', legal: '', owner: '' };
+
+            // Consent number: BCO pattern first (Auckland), then generic label match
+            let m = flat.match(/\bBCO[\s-]?(\d{6,})\b/i);
+            if (m) f.consent = 'BCO' + m[1];
+            if (!f.consent) {
+                m = flat.match(/consent\s*number\s*[:;.,]?\s*([A-Z]{0,4}[\s-]?\d{5,})/i);
+                if (m) f.consent = m[1].replace(/\s+/g, '');
+            }
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+
+                if (!f.address && /street\s+address\s+of/i.test(line)) {
+                    let v = line.replace(/.*street\s+address\s+of/i, '');
+                    v = v.replace(/^\s*(the\s+)?building\s*[:;.,]?/i, '');
+                    v = cleanOcrValue(v);
+                    if (!v && lines[i + 1] && !/legal|description|owner/i.test(lines[i + 1])) {
+                        v = cleanOcrValue(lines[i + 1]);
+                    }
+                    if (v.length > 5) f.address = v;
+                }
+
+                if (!f.legal && /land\s+where\s+building/i.test(line)) {
+                    let v = line.replace(/.*land\s+where\s+building/i, '');
+                    v = v.replace(/^\s*is\s+located\s*[:;.,]?/i, '');
+                    v = cleanOcrValue(v);
+                    if (!v && lines[i + 1] && !/is\s+located|building\s+name/i.test(lines[i + 1])) {
+                        v = cleanOcrValue(lines[i + 1]);
+                    }
+                    if (v.length > 3) f.legal = v;
+                }
+
+                if (!f.owner && /name\s+of\s+owner/i.test(line)) {
+                    let v = line.replace(/.*name\s+of\s+owner/i, '');
+                    v = cleanOcrValue(v);
+                    if (!v && lines[i + 1] && !/contact\s+person|mailing/i.test(lines[i + 1])) {
+                        v = cleanOcrValue(lines[i + 1]);
+                    }
+                    if (v.length > 2) f.owner = v;
+                }
+            }
+
+            // Legal description fallback: Lot/DP pattern anywhere in the text
+            if (!f.legal) {
+                m = flat.match(/((?:\d+\/\d+\s+SH\s+)?Lot\s+\d+\s+DP\s+\d+[^|\n]*)/i);
+                if (m) f.legal = cleanOcrValue(m[1]);
+            }
+            return f;
+        }
+
+        function parseAndDisplay(text, ocrFields, isOcr) {
             text = text.replace(/\s+/g, ' ');
-            const consentMatch = text.match(/Building consent number:\s*([A-Z0-9\-]+)/i);
-            const ownerMatch   = text.match(/Name of owner:\s*(.*?)(?=\s*Contact person:|\s*Mailing address:)/i);
-            const addressMatch = text.match(/Street address of.*?building:\s*(.*?)(?=\s*Legal description)/i);
-            const legalMatch   = text.match(/Legal description of.*?located:\s*(.*?)(?=\s*Building name:)/i);
+            // [:;.,] tolerance: OCR sometimes misreads colons
+            const consentMatch = text.match(/Building consent number\s*[:;.,]?\s*([A-Z0-9\-]+)/i);
+            const ownerMatch   = text.match(/Name of owner\s*[:;.,]?\s*(.*?)(?=\s*Contact person|\s*Mailing address)/i);
+            const addressMatch = text.match(/Street address of.*?building\s*[:;.,]?\s*(.*?)(?=\s*Legal description)/i);
+            const legalMatch   = text.match(/Legal description of.*?located\s*[:;.,]?\s*(.*?)(?=\s*Building name)/i);
 
             extracted.consent = consentMatch ? consentMatch[1].trim() : '';
             extracted.owner   = ownerMatch   ? ownerMatch[1].trim()   : '';
             extracted.address = addressMatch ? addressMatch[1].trim() : '';
             extracted.legal   = legalMatch   ? legalMatch[1].trim()   : '';
+
+            // OCR path: prefer line-based results, keep regex results as fallback
+            if (ocrFields) {
+                for (const k of ['consent', 'owner', 'address', 'legal']) {
+                    if (ocrFields[k]) extracted[k] = ocrFields[k];
+                }
+            }
+
+            const notice = document.getElementById('ocr-notice');
+            if (notice) notice.style.display = isOcr ? 'block' : 'none';
 
             setValue('val-consent', extracted.consent);
             setValue('val-owner',   extracted.owner);
