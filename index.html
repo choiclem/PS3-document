@@ -185,7 +185,12 @@
         </div>
 
         <div id="ocr-notice" style="display:none; font-size:0.78rem; color:#b45309; background:#fef3c7; border:1px solid #fcd34d; border-radius:6px; padding:8px 12px; margin-bottom:14px;">
-            ⚠ Extracted via OCR (scanned PDF) — numbers and letters may be misread. Please verify each value against the original document.
+            ⚠ Extracted via OCR (scanned PDF) — numbers and letters may be misread. Compare the original below, then edit the boxes directly before creating the PS3.
+        </div>
+
+        <div id="ocr-preview" style="display:none; margin-bottom:14px;">
+            <div style="font-size:0.65rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin-bottom:6px;">Original document — top of page 1</div>
+            <img id="ocr-preview-img" alt="Scanned consent preview" style="width:100%; border:1px solid var(--rule); border-radius:6px; display:block; background:#fff;">
         </div>
 
         <div class="field">
@@ -340,6 +345,8 @@
                 && /Building\s+consent\s+number/i.test(text);
         }
 
+        let ocrPreviewDataUrl = null;
+
         async function ocrPdf(pdf) {
             await loadTesseract();
             let ocrText = '';
@@ -354,6 +361,20 @@
                 canvas.width = Math.ceil(viewport.width);
                 canvas.height = Math.ceil(viewport.height);
                 await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+                // Page 1: keep a crop of the top section (THE BUILDING → owner rows)
+                // so the user can visually verify the OCR result against the original
+                if (p === 1) {
+                    const cropH = Math.round(canvas.height * 0.42);
+                    const targetW = Math.min(1400, canvas.width);
+                    const s = targetW / canvas.width;
+                    const prev = document.createElement('canvas');
+                    prev.width = targetW;
+                    prev.height = Math.round(cropH * s);
+                    prev.getContext('2d').drawImage(canvas, 0, 0, canvas.width, cropH, 0, 0, prev.width, prev.height);
+                    ocrPreviewDataUrl = prev.toDataURL('image/jpeg', 0.88);
+                    prev.width = prev.height = 0;
+                }
 
                 const { data } = await Tesseract.recognize(canvas, 'eng', {
                     logger: (m) => {
@@ -370,6 +391,7 @@
 
         async function extractTextFromPDF(pdfData) {
             try {
+                ocrPreviewDataUrl = null;
                 setLoadingText('Extracting data…');
                 const pdf = await pdfjsLib.getDocument(pdfData).promise;
                 let fullText = '';
@@ -454,6 +476,26 @@
                 m = flat.match(/((?:\d+\/\d+\s+SH\s+)?Lot\s+\d+\s+DP\s+\d+[^|\n]*)/i);
                 if (m) f.legal = cleanOcrValue(m[1]);
             }
+
+            // Street address fallback: OCR often mangles the "Street address of building:"
+            // label (e.g. "Ti of ..."). The value sits ABOVE the Legal description row in
+            // THE BUILDING section, so scan that window for an address-looking line.
+            if (!f.address) {
+                const legalIdx = lines.findIndex(l => /legal\s+description/i.test(l));
+                const searchEnd = legalIdx > 0 ? legalIdx : Math.min(lines.length, 12);
+                for (let i = 0; i < searchEnd; i++) {
+                    let l = lines[i];
+                    if (/auckland\s+council|section\s+51|form\s+5|building\s+act|date\s+building/i.test(l)) continue;
+                    if (!/\d/.test(l)) continue;
+                    if (!/\b(street|st|road|rd|avenue|ave|drive|dr|lane|ln|place|pl|terrace|crescent|highway|way|quay|esplanade|parade)\b/i.test(l)) continue;
+                    // strip mangled label prefix ending in "of" (e.g. "Ti of", "mtbr of")
+                    const head = l.slice(0, 16);
+                    const ofPos = head.search(/\bof\b/i);
+                    if (ofPos >= 0) l = l.slice(ofPos + 2);
+                    const v = cleanOcrValue(l);
+                    if (v.length > 8) { f.address = v; break; }
+                }
+            }
             return f;
         }
 
@@ -480,10 +522,22 @@
             const notice = document.getElementById('ocr-notice');
             if (notice) notice.style.display = isOcr ? 'block' : 'none';
 
-            setValue('val-consent', extracted.consent);
-            setValue('val-owner',   extracted.owner);
-            setValue('val-address', extracted.address);
-            setValue('val-legal',   extracted.legal);
+            const preview = document.getElementById('ocr-preview');
+            const previewImg = document.getElementById('ocr-preview-img');
+            if (preview && previewImg) {
+                if (isOcr && ocrPreviewDataUrl) {
+                    previewImg.src = ocrPreviewDataUrl;
+                    preview.style.display = 'block';
+                } else {
+                    preview.style.display = 'none';
+                    previewImg.removeAttribute('src');
+                }
+            }
+
+            setValue('val-consent', extracted.consent, isOcr);
+            setValue('val-owner',   extracted.owner,   isOcr);
+            setValue('val-address', extracted.address, isOcr);
+            setValue('val-legal',   extracted.legal,   isOcr);
 
             const todayISO = new Date().toISOString().split('T')[0];
             document.getElementById('input-date').value = todayISO;
@@ -492,9 +546,32 @@
             document.getElementById('results').classList.add('visible');
         }
 
-        function setValue(id, value) {
+        const FIELD_KEYS = { 'val-consent': 'consent', 'val-owner': 'owner', 'val-address': 'address', 'val-legal': 'legal' };
+
+        function setValue(id, value, editable) {
             const el = document.getElementById(id);
-            if (value) {
+            if (editable) {
+                // OCR result → editable input so misreads can be corrected before PS3 creation
+                const key = FIELD_KEYS[id];
+                el.className = 'field-value';
+                el.innerHTML = '';
+                const wrap = document.createElement('div');
+                wrap.style.cssText = 'display:flex; gap:8px; align-items:center;';
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'custom-input';
+                input.value = value || '';
+                input.placeholder = 'Not found — enter manually';
+                input.addEventListener('input', () => { extracted[key] = input.value.trim(); });
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'copy-btn';
+                btn.textContent = 'copy';
+                btn.addEventListener('click', () => copyVal(btn, input.value));
+                wrap.appendChild(input);
+                wrap.appendChild(btn);
+                el.appendChild(wrap);
+            } else if (value) {
                 el.className = 'field-value';
                 el.innerHTML = value + `<button class="copy-btn" onclick="copyVal(this,'${value.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">copy</button>`;
             } else {
