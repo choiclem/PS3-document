@@ -241,6 +241,13 @@
             <label class="field-label" for="input-type">Type of System</label>
             <input type="text" id="input-type" class="custom-input" value="6">
         </div>
+        <div class="field form-field">
+            <label class="field-label" for="input-author">Producer Statement Author</label>
+            <select id="input-author" class="custom-input">
+                <option value="shawn" selected>Shawn Deysel</option>
+                <option value="charles">Charles Chang</option>
+            </select>
+        </div>
 
         <div class="ps3-action">
             <button class="ps3-btn" id="ps3-btn" onclick="createPS3()">
@@ -282,6 +289,11 @@
 
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('pdf-upload');
+
+        const PS3_AUTHORS = {
+            shawn:   { name: 'Shawn Deysel', acceptance: '127200' },
+            charles: { name: 'Charles Chang', acceptance: '127660' }
+        };
 
         // Automatically update System and Type based on Standard selection
         document.getElementById('input-standard').addEventListener('change', function(e) {
@@ -587,7 +599,7 @@
             });
         }
 
-        function buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eSystem, eType, docTitle) {
+        function buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eSystem, eType, docTitle, author) {
             return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -759,7 +771,7 @@
 <p class="body-text">Ref: ${eJob}</p>
 
 <div class="author-row">
-  <div>Producer Statement Author &ndash; Acceptance No.:127200</div>
+  <div>Producer Statement Author &ndash; Acceptance No.:${author.acceptance}</div>
   <div style="margin-right: 50mm;">Date ${dateStr}</div>
 </div>
 
@@ -790,7 +802,7 @@
   </tr>
 </table>
 
-<div class="signature">Signature ................................................................................(Shawn Deysel)</div>
+<div class="signature">Signature ................................................................................(${author.name})</div>
 
 </div><!-- end page-content -->
 
@@ -908,7 +920,7 @@
                     dateStr = '<span class="placeholder">"Date"</span>';
                 }
 
-                const html = buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eSystem, eType, docTitle);
+                const html = buildPS3Html(eConsent, eOwner, eAddress, eLegal, dateStr, eJob, eContractor, eStandard, eSystem, eType, docTitle, PS3_AUTHORS[document.getElementById('input-author').value] || PS3_AUTHORS.shawn);
                 
                 const win = window.open('', '_blank');
                 if (win) {
